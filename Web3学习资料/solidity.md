@@ -1,0 +1,249 @@
+![[Pasted image 20260114134629.png]]
+public 代表公开
+## 类型和值
+bool ：布尔值 true和false
+uint ：无符号整型，有uint256、uint8、uint16（往上加8就行）
+int ：整型，-2 ** 256 to 2 ** 255 - 1
+.min : 最小值
+.max : 最大值（这些内置函数跟python一样）
+address : solidity独特的变量类型，内容就是个20字节数字，默认就是0x0，像个表情符号
+bytes32 ：比地址类型长，是32位数字
+
+contract : 合约，后面接函数名，把它理解成一个python的类
+function ：函数
+external ： 访问权限关键词，作用跟public一样，控制谁可以调用这个函数，但它只允许外部账户（比如我自己的钱包地址或者其他合约），当前合约内部的其他函数不能够调用
+pure ：纯函数类型，不能够读、也不能够写状态变量，只能局部变量，概念还不是很懂，就说是不能对链上进行任何的读写操作
+
+状态变量约等于python的全局变量，但是solidity的状态变量是存储在区块链上的，区块链不死，就可以一直存在，操作不可逆，修改要gas，而python是存储在系统内存中的，随时可以改，程序一关，变量就没了
+
+在函数局部里面，可以直接修改状态变量，这里跟python不同，不需要加global之类的关键字，因为solidity需要便捷的操作它，所以简化了“访问/修改权限”的声明，但是这里有一个要注意的点：如果要修改状态变量，在函数名后的修饰符那里，就不能用 pure 或者 view，pure是不能读也不能写，view是只读不写，如果加了这两个修饰符，就会报错，保持默认或者根据需要加 public / external权限
+
+原来external、internal、public这些关键字是为了省gas来分场景使用的，public内外都可以调用，所以会占用更多空间，external只有外部能调用，所以把内部空间省下了，在高频外部调用场景中，很好用
+
+pure、view和无修饰符，是强制约束 + gas优化，我还以为可以从宽松到严格随便使用
+如果只使用局部变量 / 输入参数 ：必须用 pure
+如果只读状态变量但不修改 ： 必须用 view
+如果需要改状态变量 ：不能用 pure / view
+按“从严格到宽松”的顺序来判断：
+先看是否改状态（改则无修饰符） 》》不改的话，看是否会读状态（读则 view ，不读则 pure）
+
+---
+状态变量就是链上的信息，改状态变量就是改链上的数据
+
+数据类型一般是有默认值的：
+bool 默认是 false
+uint 默认是 0
+int 默认是 0
+address 默认是 0x1e16
+bytes32 默认是 0x1e32
+还有一些没学到....
+
+如果在一个文件里面定义了多个contract，在Deploy的时候，默认只会部署第一个contract，这个时候，需要在编译器的CONTRACT那个框框里面去单独选择其它合约Deploy，我还奇怪为什么写了两个contract，Deploy之后却只有一个contract
+
+有一个常量的概念，事先我们是知道一些变量的固定值的，这些变量本身是不能被任何的合约所修改的，比如调用者address或者是一些特殊的编码，这些就会通常定义为常量，可以节省Gas，一般常量命名用大写，这是有一个 **constant** 的修饰符，是专门用来定义常量的，我尝试了一下，使用 constant 定义后的常量读取地址的Gas是 **373** ，没有用 constant 定义的读取地址的Gas是 **2485** ，这个差距有点大，但比起升级之前的Gas来说，已经可以算九牛一毛了，但这里有一个概念没弄明白，最开始是说只读方法可以不用消耗Gas的，但这里是说，常量在写入函数中还会再读取的， 这个时候就会按照是否定义常量来消耗Gas，这里我的理解就是如果不在写入函数，就是在不修改链上状态的情况下，是不用消耗Gas的
+
+if else 条件判断
+这个不难理解，修饰符搭配好就行
+```
+function example(uint _x) external pure returns (uint) {
+	if (_x < 10) {
+		return 1;
+	} else if (_x < 20) {
+		return 2;
+	}
+	return 3; // 这里默认返回3，可以加 return ，也可以不加
+}
+
+function ternary(uint _x) external pure returns (uint) {
+	return _x < 10 ? 1 : 2; // 三元表达式，这样写比较简洁， ？ 是满足就输出1，：是默认，也就是不满足条件就输出2
+}
+```
+
+循环：这里又学会一个新单词 pools
+for循环 and while循环
+这个跟python的逻辑是一样的，倒不用花多少时间重新理解，不过这里要注意的一点是while不能用true，这个不像其它语言在一些实时监控场景上可以用到，在区块链上用true会造成Gas无用消耗，就算加个break，最好也限制循环次数，毕竟Gas就是钱
+![[Pasted image 20260114110843.png]]
+这几种错误判断让我迷糊了一下
+require、revert、assert
+![[Pasted image 20260114114445.png]]
+**require** 的判断逻辑是：**满足条件就继续执行，不满足条件才抛出错误并且回滚**
+在上面截图中是
+```
+require(_i <= 10, "i > 10");
+// Code
+```
+这里的判断逻辑是如果  _i  小于并且等于10 ，就会去继续执行下面的代码，但如果不满足这个条件，就直接抛出 “i > 10“的报错信息并且回滚之前的操作，退还多余的Gas，但是已经执行了步骤消耗的Gas是不会退回的。
+
+**revert** 的判断逻辑是：**先通过代码判断条件，只要满足【定义的错误条件】，就主动抛出错误并回滚；不满足错误条件，就继续执行，这个就跟python差不多理解了，反正是条件满足就执行里面的语句** 
+大白话解释：**if(错误条件) { revert("错误提示");} 【我先检查是不是出现了某个错误情况，如果确实出现了，就直接报错，函数啥也不干了，之前的操作全部撤销；如果没出现这个错误情况，就继续执行后面的逻辑】**
+```
+if (_i > 10) {
+	revert("i > 10"); // 关键逻辑
+}
+// More Code 只有 i <= 10 才会执行
+```
+require是满足就执行后续代码，revert是满足就抛出报错，有点意思，反着来
+
+**assert** 的判断逻辑是：**校验一个【内部逻辑上绝对应该成立的条件】，只要这个条件成立，就继续执行；如果条件不成立（说明合约有bug），就强制报错并回滚，且不退还剩余Gas----这也就是断言吧** 
+大白话解释：**assert（正常条件） 【我这里的逻辑绝对没问题，这个条件肯定成立；如果居然不成立，那就是我的合约写崩了，直接报错终止，所有操作回滚，而且剩下的Gas全部消耗掉（提醒开发者赶紧查bug）】**
+```
+uint public num = 123; // 初始值
+// 因为这个读取了状态变量，所以用的view
+function testAssert() public view {
+	assert(num == 123); // 关键校验
+	// More Code 只有num == 123 才会执行
+}
+```
+如果满足条件，也就是断言成功，就不会报错，继续执行下面的代码，如果条件不满足，也就是被其它代码改动了初始值，断言没成功，就会弹系统默认提示，函数停止，这是一个bug，必须要修复。
+assert不是用来校验外部输入的，而且用来校验【内部逻辑的不变性】，对内查bug用的，触发了就是代码有问题，去老老实实修bug就行了。
+**自定义报错** ：这可以用来节省Gas，因为有些报错信息会很长，会浪费很多Gas，这时就可以用自定义报错，对于我这种英文不好的，我觉得更适合，弄成对中文开发者比较友好的报错信息，就是不知道中文字符会不会比英文字符所消耗的Gas更多。
+```
+error MyError(address caller, uint i); // 这里面还可以加变量参数呢，可以知道当时报错时的值（比如谁触发的错误，参数值是多少） error是关键字，MyError是错误名称
+function testCustomError() public view {
+	if (_i > 10) {
+		revert MyError(msg.sender, _i); // msg.sender(调用者的地址) i(传入的参数值)作为参数传给错误，相当于“报错时带上具体信息”
+	}
+}
+```
+自定义错误有几个好处：更省Gas、更灵活、更规范
+
+---
+函数修饰器 **modifier** ：这是个关键字，它的主要作用是把重复的代码弄到一块去，这样其它函数需要使用的时候直接修饰一下就可以了，还可以弄三明治形式，插到中间，总的来说，就是可以不用写太多重复代码，跟函数一样，我觉得应该可以算是函数里面的函数，叫函函算了。
+```
+contract FunctionModifier {
+	pool public paused; // 定义暂停的状态变量，这里默认是false
+	uint public count; // 定义计数器
+	
+	function setPaused(bool _paused) external {
+		paused = _paused;
+	}
+	
+	modifier whenNotPaused {
+		require(!paused, "paused"); // 这里的逻辑我绕了一下，！是不的意思，paused是暂停的意思，paused的默认值又是false，所以这里就是 不false，不false=true，那这里就是true的意思，就不会报错，而且会继续执行后续的代码，刚开始对false和true没弄明白，这里是需要去接受外部输入的，就是用户调用，在调用层，用户输入的值如果是false，也就是默认值，这里就不会暂停，但如果用户输入的是true，这里就会是 ！true = 不true = false，那这里就会报错“paused”，就会暂停，因为这里条件不满足，这是require的判断逻辑。
+		_; // 这就是函数修饰完之后其它代码插入的地方，我觉得可以理解成占位符吧，反正就是先占个茅坑
+	}
+	
+	function inc() external whenNotPaused {
+		count += 1; // 这里就可以把在函数修饰符里面占的茅坑填上了
+	}
+	
+	function dec() external whenNotPaused {
+		count -= 1; // 这里跟前面的inc()的功能是一样的，所以inc（）和dec（）两个函数甚至更多函数需要用到暂停这个功能，就直接用whenNotPaused修饰一样就可以了，就避免每次都需要写一行暂停，虽然不算麻烦，但整体看上去会更简洁，就是不知道会不会省Gas，应该不会，毕竟工作量还是要有的
+	}
+	
+	modifier cap(uint _x) {
+		require(_x < 100, "x >= 100"); // 在函数修饰符里面加上变量，整体读下来，其实跟直接把判断逻辑写在函数里面没区别，就是把这个判断逻辑单独摘出来，然后其它函数可能也能用得上，如果只是单独放在一个函数里面，那就只有那个函数局部可以使用，想到这里，这个函数修饰符的作用，是不是就是把逻辑封装成一个类似于状态变量类型的东西呢？（这里AI纠正了一下，它说把修饰器说成是 逻辑模板/共享规则 会更好，我也觉得是的）状态变量是值，但这里是逻辑，同样是其它函数都可以使用，不过状态变量是函数和代码都可以调用，而这个函数修饰符只是给函数服务而已
+		_;
+	}
+	
+	// 这里有两个修饰符，按从左往右的顺序运行，先判断是否需要暂停，再判断用户输入的值是否小于100，这里cap的修饰里面需要传参进去
+	function incBy(uint _x) external whenNotPaused cap(_x) {
+		count += _x; // 前面都没问题的话，这里的代码就会插入茅坑
+	}
+	
+	modifier sandwich() {
+		// Code Here 这里就很好理解了，先执行第一步
+		count += 10;
+		_; // 然后占茅坑
+		// More Code Here
+		count *= 2; // 茅坑填完之后，再回到修饰符执行这段代码，跟三明治、汉堡包🍔一样，夹心的
+	}
+	
+	function foo() external sandwich {
+		count += 1;
+	}
+}
+```
+构造函数 **constructor** ：这个玩意只能在Deploy Contract的时候定义一次，难怪叫构造函数，跟Docker里面Build功能差不多吧，定义完之后就不会变动了，暂时也没学到怎么改变构造函数那一块，可能需要重新部署干嘛的
+```
+contract Constructor {
+	address public owner;
+	uint public x;
+	
+	constructor(uint _x) {
+		owner = msg.sender; // 这段定义部署者的代码应该是构造函数最常用的，在Deploy Contract时就会把msg.sender的地址传给owner，因为构造函数只能用一次，所以这时就把owner和合约部署者的地址绑定在一起，之后就可以用这个功能去设计一些只有owner可以调用的函数，这个倒是不难理解，msg.sender就是当前调用这个合约的地址，即时的，也是最核心的全局变量之一，但因为是即时的，所以在用户A--调用合约B--再调用合约C时，合约C的msg.sender会是合约B的地址，如果要获取到真实的用户A的地址，还需要其它一系列操作
+		x = _x; // 这个就是在部署合约时需要用户输入的一个值，也会绑定给x，在这里没啥作用，就是说明一下可以这样写代码，有这么个玩意在
+	}
+}
+```
+
+---
+今天就学到了可以改owner的方法，简单也简单，用管理员身份去指定下一个管理员，皇帝选皇帝，世袭制，也可以是举贤制，但总的来说，就是管理员权限最大，没有他的支持，当不了下一个管理员。
+```
+// 这是一个很常见的权限管理合约
+contract Ownable {
+	address public owner; // 先定义一个状态亦是，给管理员空间占个茅坑
+	
+	constructor() {
+		onwer = msg.sender; // 用构造函数把第一个部署的合约地址赋值给owner
+	}
+	
+	modifier onlyOwner() {
+		require(msg.sender == owner, "not owner"); // 整一个函数修饰器，判断当前调用这个函数的地址是不是管理员，如果是管理员就放行，如果不是，就报错
+		_; 
+	}
+	
+	function setOwner(address _newOwner) external onlyOwner {
+		require(_newOwner != address(0), "invalid address"); // 这是一个用来给管理员指定下一个管理员的函数，但是当前管理员指定的下一个管理员地址不能是0地址，否则会被锁死
+		owner = _newOwner; // 把新地址扔给owner
+	}
+	
+	function onlyOwnerCatCallThisFunc() external onlyOwner {
+		// Code 这是只有管理员可以调用的函数
+	}
+	
+	function anyOneCanCall() external {
+		// Code 这是所有人都可以调用的函数，主要是用来测试合约是否可以正常管理权限，我试过了，没问题的
+	}
+}
+```
+智能合约中接收返回值
+```
+contract FunctionOutputs {
+	// public是为了外部和内部都可以调用，pure纯函数意味着不需要访问状态变量，定义了两种返回类型，这个returns我没有去研究，但猜测是在返回值有两个或以上数量时才会修饰一下，返回的类型就在后面用（）装起来统一定义，跟在数据定义不一样
+	function returnMany() public pure returns (uint, bool) {
+		return(1, true);
+	}
+	
+	function named() public pure returns (uint x, bool b) {
+		// 这里可以给返回值弄一个名字，在上面的返回类型里面直接定义
+		return(1, false);
+	}
+	
+	function assigned() public pure returns (uint x, bool b) {
+		// 这个就直接在里面定义，可以不用return了，我感觉是这样
+		x = 1;
+		b = true;
+	}
+	
+	function destructingAssigments() public pure {
+		(uint x, bool b) = returnMany(); // 这就是在函数里面调用其它函数的用法，用（）把需要接收的函数值类型和名称定义好，然后跟变量赋值一样使用
+		(, bool b) = returnMany(); // 这里是只想接收某一个值，这里只想接收布尔值，这个跟python里面列表切片一样，不想要也需要占个坑，不然会报错，因为返回两个值，只弄了一个值接收，就不知道传那个给它，我猜测是这样
+	}
+}
+```
+solidity里面的数组玩法、以及在内存中如何定义、如何调用返回数组
+```
+contract Array {
+	uint[] public nums = [1, 2, 3]; // 给数组赋一个默认值，定义类型就是基础类型后面加个[]，其它倒是没什么区别
+	uint[3] public numsFixed = [4, 5, 6]; // 定义一个固定数组，与动态数组区别在于类型定义的[]里面是否有限定数量
+	
+	function examples() external {
+		nums.push(4); // 这个跟git一样，push一下，作用是往原有数组后推入一个新的值，所以这里会把nums变成[1, 2, 3, 4]
+		uint x = nums[1]; // 跟其它语言没什么区别，获取数据索引的值，赋值给变量无符号整型x
+		nums[2] = 777; // 跟上面一样，把777赋值给数组索引位置，也就是改操作,这里在会变成[1, 2, 777, 4]
+		delete nums[1]; // 我发现solidit这些语言的关键字都会使用一些比较完整的单词，相比较一些简单的语言使用缩写来说，我反而觉得这种形式会更直观一点,但这个删除操作在solidity里面只能把值变成0，不能直接把值真的删除掉，从而改变数组值的数量，所以这里会变成[1, 0, 777, 4]
+		nums.pop(); // 要改变数组数量，就需要用到pop()方法去弹出最后一个值，这里就变成[1, 0, 777]
+		nint len = nums.length; //跟python里面的len()一样
+		
+		// create array in memory 
+		uint[] memory a = new uint[](5); // 这里需要用到memory内存关键字，在内存里面定义一个新的数据，但内存中不能使用动态数组，所以需要给这个数组定义一个长度，但这里我不理解的是，为什么不跟前面一样，直接在[]里面定义，还需要在[]后面再加个()定义长度，真麻烦（噢，这里我明白了，我被这个(5)迷惑住了，这里因为是内存，所以需要在运行时动态获取数组长度，这里其实是type(len)，前面是类型，后面是动态获取到的长度，因为很多时候不知道这个长度是多少，所以不能使用numsFixed，只能是当时获取到多少长度，就用new这个关键字在运行时赋值给数组，uint[]是动态数组，就没有限定死长度，大白话就是：用 ‎new T[](len) 来在 memory 里分配一个长度为 len 的动态数组
+		a[1] = 123; // 因为只能用固定长度的数组，所以像push()、pop()这些能改变长度的方法就不能使用了，索引和赋值是可以使用的，在内存中局部变量只能够定义定长数组，而动态数组只能够存在于状态变量中
+	}
+	
+	// 这个返回类型里面需要输入数组的索引，如果需要数组全部内容，就需要在返回类型的()里面定义一个memory的内存存储类型，这样就可以把数组中的所有元素返回出来
+	function returnArray() external view returns (uint[] memory) {
+		return nums; // 通过函数来返回数组的全部内容 
+	}
+}
+```
